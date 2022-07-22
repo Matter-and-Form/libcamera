@@ -364,7 +364,7 @@ CameraConfiguration::Status RPiCameraConfiguration::validate()
 	 * error means the platform can never run. Let's just print a warning
 	 * and continue regardless; the rotation is effectively set to zero.
 	 */
-	int32_t rotation = data_->sensor_->properties().get(properties::Rotation);
+	int32_t rotation = data_->sensor_->properties().get(properties::Rotation).value_or(0);
 	bool success;
 	Transform rotationTransform = transformFromRotation(rotation, &success);
 	if (!success)
@@ -523,7 +523,7 @@ CameraConfiguration::Status RPiCameraConfiguration::validate()
 		}
 
 		V4L2DeviceFormat format;
-		format.fourcc = V4L2PixelFormat::fromPixelFormat(cfg.pixelFormat);
+		format.fourcc = V4L2PixelFormat::fromPixelFormat(cfgPixFmt);
 		format.size = cfg.size;
 		format.colorSpace = cfg.colorSpace;
 
@@ -1717,15 +1717,15 @@ void RPiCameraData::statsMetadataComplete(uint32_t bufferId, const ControlList &
 	 * Inform the sensor of the latest colour gains if it has the
 	 * V4L2_CID_NOTIFY_GAINS control (which means notifyGainsUnity_ is set).
 	 */
-	if (notifyGainsUnity_ && controls.contains(libcamera::controls::ColourGains)) {
-		libcamera::Span<const float> colourGains = controls.get(libcamera::controls::ColourGains);
+	const auto &colourGains = controls.get(libcamera::controls::ColourGains);
+	if (notifyGainsUnity_ && colourGains) {
 		/* The control wants linear gains in the order B, Gb, Gr, R. */
 		ControlList ctrls(sensor_->controls());
 		std::array<int32_t, 4> gains{
-			static_cast<int32_t>(colourGains[1] * *notifyGainsUnity_),
+			static_cast<int32_t>((*colourGains)[1] * *notifyGainsUnity_),
 			*notifyGainsUnity_,
 			*notifyGainsUnity_,
-			static_cast<int32_t>(colourGains[0] * *notifyGainsUnity_)
+			static_cast<int32_t>((*colourGains)[0] * *notifyGainsUnity_)
 		};
 		ctrls.set(V4L2_CID_NOTIFY_GAINS, Span<const int32_t>{ gains });
 
@@ -2052,8 +2052,9 @@ Rectangle RPiCameraData::scaleIspCrop(const Rectangle &ispCrop) const
 
 void RPiCameraData::applyScalerCrop(const ControlList &controls)
 {
-	if (controls.contains(controls::ScalerCrop)) {
-		Rectangle nativeCrop = controls.get<Rectangle>(controls::ScalerCrop);
+	const auto &scalerCrop = controls.get<Rectangle>(controls::ScalerCrop);
+	if (scalerCrop) {
+		Rectangle nativeCrop = *scalerCrop;
 
 		if (!nativeCrop.width || !nativeCrop.height)
 			nativeCrop = { 0, 0, 1, 1 };
@@ -2091,7 +2092,7 @@ void RPiCameraData::fillRequestMetadata(const ControlList &bufferControls,
 					Request *request)
 {
 	request->metadata().set(controls::SensorTimestamp,
-				bufferControls.get(controls::SensorTimestamp));
+				bufferControls.get(controls::SensorTimestamp).value_or(0));
 
 	request->metadata().set(controls::ScalerCrop, scalerCrop_);
 }
@@ -2160,16 +2161,12 @@ bool RPiCameraData::findMatchingBuffers(BayerFrame &bayerFrame, FrameBuffer *&em
 	if (bayerQueue_.empty())
 		return false;
 
-	/* Start with the front of the bayer queue. */
-	bayerFrame = std::move(bayerQueue_.front());
-	bayerQueue_.pop();
-
 	/*
 	 * Find the embedded data buffer with a matching timestamp to pass to
 	 * the IPA. Any embedded buffers with a timestamp lower than the
 	 * current bayer buffer will be removed and re-queued to the driver.
 	 */
-	uint64_t ts = bayerFrame.buffer->metadata().timestamp;
+	uint64_t ts = bayerQueue_.front().buffer->metadata().timestamp;
 	embeddedBuffer = nullptr;
 	while (!embeddedQueue_.empty()) {
 		FrameBuffer *b = embeddedQueue_.front();
@@ -2189,9 +2186,22 @@ bool RPiCameraData::findMatchingBuffers(BayerFrame &bayerFrame, FrameBuffer *&em
 	}
 
 	if (!embeddedBuffer && sensorMetadata_) {
+		if (embeddedQueue_.empty()) {
+			/*
+			 * If the embedded buffer queue is empty, wait for the next
+			 * buffer to arrive - dequeue ordering may send the image
+			 * buffer first.
+			 */
+			LOG(RPI, Debug) << "Waiting for next embedded buffer.";
+			return false;
+		}
+
 		/* Log if there is no matching embedded data buffer found. */
 		LOG(RPI, Debug) << "Returning bayer frame without a matching embedded buffer.";
 	}
+
+	bayerFrame = std::move(bayerQueue_.front());
+	bayerQueue_.pop();
 
 	return true;
 }

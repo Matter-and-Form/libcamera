@@ -8,6 +8,7 @@
 #pragma once
 
 #include <assert.h>
+#include <optional>
 #include <set>
 #include <stdint.h>
 #include <string>
@@ -369,17 +370,17 @@ public:
 	void clear() { controls_.clear(); }
 	void merge(const ControlList &source);
 
-	bool contains(const ControlId &id) const;
 	bool contains(unsigned int id) const;
 
 	template<typename T>
-	T get(const Control<T> &ctrl) const
+	std::optional<T> get(const Control<T> &ctrl) const
 	{
-		const ControlValue *val = find(ctrl.id());
-		if (!val)
-			return T{};
+		const auto entry = controls_.find(ctrl.id());
+		if (entry == controls_.end())
+			return std::nullopt;
 
-		return val->get<T>();
+		const ControlValue &val = entry->second;
+		return val.get<T>();
 	}
 
 	template<typename T, typename V>
