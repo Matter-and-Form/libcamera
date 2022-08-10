@@ -3,6 +3,7 @@
 conf_files = files([
     'imx219.json',
     'imx219_noir.json',
+    'imx258.json',
     'imx290.json',
     'imx296.json',
     'imx378.json',
