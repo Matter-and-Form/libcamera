@@ -16,8 +16,6 @@ class CamHelperImx258 : public CamHelper
 {
 public:
 	CamHelperImx258();
-	uint32_t GainCode(double gain) const override;
-	double Gain(uint32_t gain_code) const override;
 	void GetDelays(int &exposure_delay, int &gain_delay,
 		       int &vblank_delay) const override;
 	unsigned int HideFramesModeSwitch() const override;
@@ -35,23 +33,13 @@ CamHelperImx258::CamHelperImx258()
 {
 }
 
-uint32_t CamHelperImx258::GainCode(double gain) const
-{
-	int code = 66.6667 * log10(gain);
-	return std::max(0, std::min(code, 0xf0));
-}
-
-double CamHelperImx258::Gain(uint32_t gain_code) const
-{
-	return pow(10, 0.015 * gain_code);
-}
 
 void CamHelperImx258::GetDelays(int &exposure_delay, int &gain_delay,
 				int &vblank_delay) const
 {
-	exposure_delay = 2;
-	gain_delay = 2;
-	vblank_delay = 2;
+	exposure_delay = 1;
+	gain_delay = 1;
+	vblank_delay = 1;
 }
 
 unsigned int CamHelperImx258::HideFramesModeSwitch() const
